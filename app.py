@@ -54,7 +54,7 @@ if navigation == "📊 Tabular: Churn Predictor":
             "tenure": tenure,
             "monthly_charges": monthly_charges,
             "total_charges": total_charges,
-            "contract": contract_type
+            "contract": contract_type,
             "age": age,
             "plan": plan
         }
