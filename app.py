@@ -55,7 +55,7 @@ if navigation == "📊 Tabular: Churn Predictor":
             "contract": contract_type
         }
         try:
-            response = requests.post(churn_url, json=payload, timeout=10)
+            response = requests.post(churn_url, json=payload, timeout=60)
             if response.status_code == 200:
                 result = response.json()
                 st.success(f"**Prediction Result:** {result}")
@@ -84,7 +84,7 @@ elif navigation == "🖼️ CV: Image Resizer":
         data = {"width": width, "height": height}
         
         try:
-            response = requests.post(cv_url, files=files, data=data, timeout=15)
+            response = requests.post(cv_url, files=files, data=data, timeout=60)
             if response.status_code == 200:
                 resized_image = Image.open(io.BytesIO(response.content))
                 st.image(resized_image, caption=f"Resized Output ({width}x{height})")
@@ -108,7 +108,7 @@ elif navigation == "💬 NLP: Sentiment Analysis":
         else:
             payload = {"text": text_input}
             try:
-                response = requests.post(nlp_url, json=payload, timeout=15)
+                response = requests.post(nlp_url, json=payload, timeout=60)
                 if response.status_code == 200:
                     result = response.json()
                     st.json(result)
