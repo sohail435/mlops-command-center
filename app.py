@@ -15,9 +15,9 @@ st.set_page_config(
 st.sidebar.title("⚙️ Endpoint Configuration")
 st.sidebar.markdown("Configure backend URLs (Render/Koyeb or local NodePort):")
 
-DEFAULT_CHURN_URL = os.getenv("CHURN_API_URL", "http://localhost:30080/predict")
-DEFAULT_CV_URL = os.getenv("CV_API_URL", "http://localhost:30090/resize")
-DEFAULT_NLP_URL = os.getenv("NLP_API_URL", "http://localhost:30100/analyze")
+DEFAULT_CHURN_URL = st.secrets.get("CHURN_API_URL", "http://localhost:30080/predict")
+DEFAULT_CV_URL = st.secrets.get("RESIZER_API_URL", "http://localhost:30090/resize")
+DEFAULT_NLP_URL = st.secrets.get("SENTIMENT_API_URL", "http://localhost:30100/analyze")
 
 churn_url = st.sidebar.text_input("Churn Predictor Endpoint", DEFAULT_CHURN_URL)
 cv_url = st.sidebar.text_input("Image Resizer Endpoint", DEFAULT_CV_URL)
