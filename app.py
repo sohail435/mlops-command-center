@@ -46,8 +46,8 @@ if navigation == "📊 Tabular: Churn Predictor":
         age = st.number_input("Age", min_value=18, max_value=100, value=30)
     with col2:
         total_charges = st.number_input("Total Charges ($)", min_value=0.0, value=786.0)
-        contract_type = st.selectbox("Contract Type", ["Month-to-month", "One year", "Two year"])
-        plan = st.selectbox("Plan Type", ["Basic", "Standard", "Premium"]) # match your API expected string values
+        contract_type = st.selectbox("Contract Type", ["month-to-month", "one year", "two year"])
+        plan = st.selectbox("Plan Type", ["basic", "standard", "premium"]) # match your API expected string values
 
     if st.button("Predict Churn", type="primary"):
         payload = {
