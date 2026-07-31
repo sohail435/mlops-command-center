@@ -43,9 +43,11 @@ if navigation == "📊 Tabular: Churn Predictor":
     with col1:
         tenure = st.number_input("Tenure (Months)", min_value=0, max_value=120, value=12)
         monthly_charges = st.number_input("Monthly Charges ($)", min_value=0.0, value=65.5)
+        age = st.number_input("Age", min_value=18, max_value=100, value=30)
     with col2:
         total_charges = st.number_input("Total Charges ($)", min_value=0.0, value=786.0)
         contract_type = st.selectbox("Contract Type", ["Month-to-month", "One year", "Two year"])
+        plan = st.selectbox("Plan Type", ["Basic", "Standard", "Premium"]) # match your API expected string values
 
     if st.button("Predict Churn", type="primary"):
         payload = {
@@ -53,6 +55,8 @@ if navigation == "📊 Tabular: Churn Predictor":
             "monthly_charges": monthly_charges,
             "total_charges": total_charges,
             "contract": contract_type
+            "age": age,
+            "plan": plan
         }
         try:
             response = requests.post(churn_url, json=payload, timeout=60)
