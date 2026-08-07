@@ -139,8 +139,22 @@ if navigation == "📊 Tabular: Churn Predictor":
         if result.get("success"):
             data = result['data']
             
-            # --- ADD THIS TEMPORARY LINE TO DEBUG ---
-            st.write("DEBUG RAW DATA:", data)
+            # Extract values matching your exact API dictionary keys
+            is_churn = data.get("churn_prediction")
+            prob = data.get("churn_probability")
+            
+            st.markdown("### 🎯 Analysis Result")
+            
+            if is_churn == 1:
+                st.error("🚨 **High Risk:** This customer is highly likely to churn.")
+            else:
+                st.success("✅ **Low Risk:** This customer is likely to stay retained.")
+                
+            # Render the probability cleanly as a metric card
+            if prob is not None:
+                st.metric(label="Churn Probability", value=f"{float(prob) * 100:.1f}%")
+        else:
+            st.error(result.get("error"))
             # ----------------------------------------
             
             is_churn = data.get("churn") or data.get("prediction")
