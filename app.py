@@ -139,23 +139,12 @@ if navigation == "📊 Tabular: Churn Predictor":
         if result.get("success"):
             data = result['data']
             
-            # Extract values based on your API response structure (e.g., {"churn": True/False, "probability": 0.85})
-            # Adjust the keys below if your API uses different naming conventions
+            # --- ADD THIS TEMPORARY LINE TO DEBUG ---
+            st.write("DEBUG RAW DATA:", data)
+            # ----------------------------------------
+            
             is_churn = data.get("churn") or data.get("prediction")
             prob = data.get("probability") or data.get("confidence")
-            
-            st.markdown("### 🎯 Analysis Result")
-            
-            if is_churn:
-                st.error("🚨 **High Risk:** This customer is highly likely to churn.")
-            else:
-                st.success("✅ **Low Risk:** This customer is likely to stay retained.")
-                
-            # If your API provides probability scores, display them elegantly
-            if prob is not None:
-                st.metric(label="Churn Probability", value=f"{float(prob) * 100:.1f}%")
-        else:
-            st.error(result.get("error"))
 # ==========================================
 # 🖼️ TAB 2: COMPUTER VISION - IMAGE RESIZER
 # ==========================================
