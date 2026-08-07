@@ -4,6 +4,50 @@ from PIL import Image
 import io
 import os
 
+
+# ==============================================================================
+# 🎛️ CENTRAL ROUTER & DEMAND-DRIVEN CONTROLLER
+# ==============================================================================
+class MLOpsGateway:
+    def __init__(self):
+        # Fallback to local routes if secrets aren't populated yet
+        self.services = {
+            "churn": st.secrets.get("CHURN_API_URL", "http://localhost:8000/predict"),
+            "sentiment": st.secrets.get("SENTIMENT_API_URL", "http://localhost:8000/predict"),
+            "image": st.secrets.get("IMAGE_API_URL", "http://localhost:8000/resize")
+        }
+        
+    def get_health_url(self, service_name):
+        """Extracts the base URL and targets the /health endpoint."""
+        base_url = self.services[service_name].rsplit('/', 1)[0]
+        return f"{base_url}/health"
+
+    def check_service_health(self, service_name):
+        """Checks if a specific service is awake right now."""
+        health_url = self.get_health_url(service_name)
+        try:
+            # Low timeout because we don't want the UI hanging forever on health checks
+            response = requests.get(health_url, timeout=5)
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    def route_predict(self, service_name, payload):
+        """Unified inference router with standardized error management."""
+        url = self.services.get(service_name)
+        if not url:
+            return {"error": f"Service '{service_name}' configuration missing."}
+        try:
+            # 60-second timeout allows Render engines ample time to wake up if hibernating
+            response = requests.post(url, json=payload, timeout=60)
+            return response.json()
+        except requests.exceptions.Timeout:
+            return {"error": "Request timed out. The engine is waking up from free-tier hibernation. Please try again in a moment!"}
+        except Exception as e:
+            return {"error": f"Failed to connect to backend: {str(e)}"}
+
+# Initialize the gateway instance
+gateway = MLOpsGateway()
 # --- Page Configuration ---
 st.set_page_config(
     page_title="Enterprise MLOps Command Center",
@@ -12,7 +56,15 @@ st.set_page_config(
 )
 
 # --- Sidebar & API Configuration ---
-st.sidebar.title("⚙️ Endpoint Configuration")
+st.sidebar.title("🔋 System Status Command Center")
+
+if st.sidebar.button("Check Backend Status"):
+    for service in ["churn", "sentiment", "image"]:
+        is_alive = gateway.check_service_health(service)
+        if is_alive:
+            st.sidebar.success(f"🟢 {service.upper()} Service: Ready")
+        else:
+            st.sidebar.warning(f"🟡 {service.upper()} Service: Asleep (Will trigger cold start)")
 st.sidebar.markdown("Configure backend URLs (Render/Koyeb or local NodePort):")
 
 DEFAULT_CHURN_URL = st.secrets.get("CHURN_API_URL", "http://localhost:30080/predict")
