@@ -2,19 +2,18 @@ import streamlit as st
 import requests
 from PIL import Image
 import io
-import os
-
 
 # ==============================================================================
 # 🎛️ CENTRAL ROUTER & DEMAND-DRIVEN CONTROLLER
 # ==============================================================================
 class MLOpsGateway:
-    def __init__(self):
-        # Fallback to local routes if secrets aren't populated yet
+    def __init__(self, override_urls=None):
+        # Fallback priority: Sidebar text fields -> Streamlit Secrets -> Local Dev defaults
+        # Synchronizes variable names to ensure RESIZER_API_URL / IMAGE_API_URL consistency
         self.services = {
-            "churn": st.secrets.get("CHURN_API_URL", "http://localhost:8000/predict"),
-            "sentiment": st.secrets.get("SENTIMENT_API_URL", "http://localhost:8000/predict"),
-            "image": st.secrets.get("IMAGE_API_URL", "http://localhost:8000/resize")
+            "churn": override_urls.get("churn") if override_urls else st.secrets.get("CHURN_API_URL", "http://localhost:8000/predict"),
+            "sentiment": override_urls.get("sentiment") if override_urls else st.secrets.get("SENTIMENT_API_URL", "http://localhost:8000/predict"),
+            "image": override_urls.get("image") if override_urls else st.secrets.get("IMAGE_API_URL", "http://localhost:8000/resize")
         }
         
     def get_health_url(self, service_name):
@@ -26,28 +25,41 @@ class MLOpsGateway:
         """Checks if a specific service is awake right now."""
         health_url = self.get_health_url(service_name)
         try:
-            # Low timeout because we don't want the UI hanging forever on health checks
             response = requests.get(health_url, timeout=5)
             return response.status_code == 200
         except Exception:
             return False
 
     def route_predict(self, service_name, payload):
-        """Unified inference router with standardized error management."""
+        """Unified inference router with standardized error management for standard JSON payloads."""
         url = self.services.get(service_name)
         if not url:
             return {"error": f"Service '{service_name}' configuration missing."}
         try:
-            # 60-second timeout allows Render engines ample time to wake up if hibernating
             response = requests.post(url, json=payload, timeout=60)
-            return response.json()
+            if response.status_code == 200:
+                return {"success": True, "data": response.json()}
+            return {"success": False, "error": f"API Error ({response.status_code}): {response.text}"}
         except requests.exceptions.Timeout:
-            return {"error": "Request timed out. The engine is waking up from free-tier hibernation. Please try again in a moment!"}
+            return {"success": False, "error": "Request timed out. The engine is waking up from free-tier hibernation. Please try again!"}
         except Exception as e:
-            return {"error": f"Failed to connect to backend: {str(e)}"}
+            return {"success": False, "error": f"Failed to connect to backend: {str(e)}"}
 
-# Initialize the gateway instance
-gateway = MLOpsGateway()
+    def route_file_process(self, service_name, files, data):
+        """Specialized routing method for multipart/form-data operations (Image Processing)."""
+        url = self.services.get(service_name)
+        if not url:
+            return {"success": False, "error": f"Service '{service_name}' configuration missing."}
+        try:
+            response = requests.post(url, files=files, data=data, timeout=60)
+            if response.status_code == 200:
+                return {"success": True, "content": response.content}
+            return {"success": False, "error": f"API Error ({response.status_code}): {response.text}"}
+        except requests.exceptions.Timeout:
+            return {"success": False, "error": "Image processor timed out during initialization. Please try again."}
+        except Exception as e:
+            return {"success": False, "error": f"File routing failure: {str(e)}"}
+
 # --- Page Configuration ---
 st.set_page_config(
     page_title="Enterprise MLOps Command Center",
@@ -58,6 +70,25 @@ st.set_page_config(
 # --- Sidebar & API Configuration ---
 st.sidebar.title("🔋 System Status Command Center")
 
+# Step 1: Sidebar Setup Inputs
+st.sidebar.markdown("Configure backend URLs (Render/Koyeb or local NodePort):")
+DEFAULT_CHURN_URL = st.secrets.get("CHURN_API_URL", "http://localhost:30080/predict")
+DEFAULT_NLP_URL = st.secrets.get("SENTIMENT_API_URL", "http://localhost:30100/predict")
+DEFAULT_CV_URL = st.secrets.get("IMAGE_API_URL", st.secrets.get("RESIZER_API_URL", "http://localhost:30090/resize"))
+
+churn_url_input = st.sidebar.text_input("Churn Predictor Endpoint", DEFAULT_CHURN_URL)
+cv_url_input = st.sidebar.text_input("Image Resizer Endpoint", DEFAULT_CV_URL)
+nlp_url_input = st.sidebar.text_input("DistilBERT NLP Endpoint", DEFAULT_NLP_URL)
+
+# Step 2: Initialize or override gateway state based on UI values
+override_map = {
+    "churn": churn_url_input,
+    "sentiment": nlp_url_input,
+    "image": cv_url_input
+}
+gateway = MLOpsGateway(override_urls=override_map)
+
+# Health Check Trigger Matrix
 if st.sidebar.button("Check Backend Status"):
     for service in ["churn", "sentiment", "image"]:
         is_alive = gateway.check_service_health(service)
@@ -65,15 +96,6 @@ if st.sidebar.button("Check Backend Status"):
             st.sidebar.success(f"🟢 {service.upper()} Service: Ready")
         else:
             st.sidebar.warning(f"🟡 {service.upper()} Service: Asleep (Will trigger cold start)")
-st.sidebar.markdown("Configure backend URLs (Render/Koyeb or local NodePort):")
-
-DEFAULT_CHURN_URL = st.secrets.get("CHURN_API_URL", "http://localhost:30080/predict")
-DEFAULT_CV_URL = st.secrets.get("RESIZER_API_URL", "http://localhost:30090/resize")
-DEFAULT_NLP_URL = st.secrets.get("SENTIMENT_API_URL", "http://localhost:30100/predict")
-
-churn_url = st.sidebar.text_input("Churn Predictor Endpoint", DEFAULT_CHURN_URL)
-cv_url = st.sidebar.text_input("Image Resizer Endpoint", DEFAULT_CV_URL)
-nlp_url = st.sidebar.text_input("DistilBERT NLP Endpoint", DEFAULT_NLP_URL)
 
 st.sidebar.markdown("---")
 navigation = st.sidebar.radio(
@@ -99,7 +121,7 @@ if navigation == "📊 Tabular: Churn Predictor":
     with col2:
         total_charges = st.number_input("Total Charges ($)", min_value=0.0, value=786.0)
         contract_type = st.selectbox("Contract Type", ["month-to-month", "one year", "two year"])
-        plan = st.selectbox("Plan Type", ["basic", "premium"]) # match your API expected string values
+        plan = st.selectbox("Plan Type", ["basic", "premium"])
 
     if st.button("Predict Churn", type="primary"):
         payload = {
@@ -110,16 +132,30 @@ if navigation == "📊 Tabular: Churn Predictor":
             "age": age,
             "plan": plan
         }
-        try:
-            response = requests.post(churn_url, json=payload, timeout=60)
-            if response.status_code == 200:
-                result = response.json()
-                st.success(f"**Prediction Result:** {result}")
+        
+        with st.spinner("Routing request through MLOpsGateway..."):
+            result = gateway.route_predict("churn", payload)
+            
+        if result.get("success"):
+            data = result['data']
+            
+            # Extract values based on your API response structure (e.g., {"churn": True/False, "probability": 0.85})
+            # Adjust the keys below if your API uses different naming conventions
+            is_churn = data.get("churn") or data.get("prediction")
+            prob = data.get("probability") or data.get("confidence")
+            
+            st.markdown("### 🎯 Analysis Result")
+            
+            if is_churn:
+                st.error("🚨 **High Risk:** This customer is highly likely to churn.")
             else:
-                st.error(f"API Error ({response.status_code}): {response.text}")
-        except Exception as e:
-            st.error(f"Failed to connect to microservice at `{churn_url}`: {e}")
-
+                st.success("✅ **Low Risk:** This customer is likely to stay retained.")
+                
+            # If your API provides probability scores, display them elegantly
+            if prob is not None:
+                st.metric(label="Churn Probability", value=f"{float(prob) * 100:.1f}%")
+        else:
+            st.error(result.get("error"))
 # ==========================================
 # 🖼️ TAB 2: COMPUTER VISION - IMAGE RESIZER
 # ==========================================
@@ -139,16 +175,27 @@ elif navigation == "🖼️ CV: Image Resizer":
         files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
         data = {"width": width, "height": height}
         
-        try:
-            response = requests.post(cv_url, files=files, data=data, timeout=60)
-            if response.status_code == 200:
-                resized_image = Image.open(io.BytesIO(response.content))
-                st.image(resized_image, caption=f"Resized Output ({width}x{height})")
-            else:
-                st.error(f"API Error ({response.status_code}): {response.text}")
-        except Exception as e:
-            st.error(f"Failed to connect to microservice at `{cv_url}`: {e}")
-
+        with st.spinner("Uploading and resizing image via Gateway matrix..."):
+            result = gateway.route_file_process("image", files=files, data=data)
+            
+        if result.get("success"):
+            # Get raw image data bytes
+            image_bytes = result["content"]
+            
+            # Display image in UI
+            resized_image = Image.open(io.BytesIO(image_bytes))
+            st.image(resized_image, caption=f"Resized Output ({width}x{height})")
+            
+            # Add space and the clean download button
+            st.markdown("### 📥 Download Processed Image")
+            st.download_button(
+                label="Download Resized Image",
+                data=image_bytes,
+                file_name=f"resized_{width}x{height}_{uploaded_file.name}",
+                mime=uploaded_file.type
+            )
+        else:
+            st.error(result.get("error"))
 # ==========================================
 # 💬 TAB 3: TRANSFORMER NLP - SENTIMENT
 # ==========================================
@@ -157,18 +204,33 @@ elif navigation == "💬 NLP: Sentiment Analysis":
     st.write("Analyze text sentiment in real time using your Transformer model.")
 
     text_input = st.text_area("Enter text to analyze:", "The MLOps deployment pipeline is running smoothly!")
-
     if st.button("Analyze Sentiment", type="primary"):
         if not text_input.strip():
             st.warning("Please enter some text first.")
         else:
             payload = {"text": text_input}
-            try:
-                response = requests.post(nlp_url, json=payload, timeout=60)
-                if response.status_code == 200:
-                    result = response.json()
-                    st.json(result)
+            
+            with st.spinner("Evaluating payload context..."):
+                result = gateway.route_predict("sentiment", payload)
+                
+            if result.get("success"):
+                data = result["data"]
+                
+                # Extract fields based on your DistilBERT pipeline output (e.g., {"label": "POSITIVE", "score": 0.99})
+                label = data.get("label") or data.get("sentiment")
+                score = data.get("score") or data.get("confidence")
+                
+                st.markdown("### 📊 Model Inference Result")
+                
+                # Visual display based on label value
+                if label and "POS" in str(label).upper():
+                    st.success(f"😊 **Positive Sentiment Detected**")
+                elif label and "NEG" in str(label).upper():
+                    st.error(f"😢 **Negative Sentiment Detected**")
                 else:
-                    st.error(f"API Error ({response.status_code}): {response.text}")
-            except Exception as e:
-                st.error(f"Failed to connect to microservice at `{nlp_url}`: {e}")
+                    st.info(f"😐 **Neutral Sentiment Detected**")
+                
+                if score is not None:
+                    st.metric(label="Model Confidence Score", value=f"{float(score) * 100:.2f}%")
+            else:
+                st.error(result.get("error"))
