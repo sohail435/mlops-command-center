@@ -2,6 +2,30 @@ import streamlit as st
 import requests
 from PIL import Image
 import io
+import time  # Essential for performance counter metrics
+
+#===============================================================================
+# SIMPLE HELPER FUNCTION FOR TELEMETRY
+#===============================================================================
+def render_telemetry_ui(result):
+    """Renders MLOps telemetry metrics if latency data is available in the gateway response."""
+    if "latency_ms" in result:
+        st.markdown("---")
+        latency = result["latency_ms"]
+        
+        # Determine performance status color boundaries
+        if latency < 200:
+            status_color = "🟢 Optimal"
+        elif latency < 1000:
+            status_color = "🟡 Acceptable"
+        else:
+            status_color = "🚨 Cold Start / High Load"
+            
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            st.metric(label="Round-Trip Latency", value=f"{latency:.0f} ms")
+        with t_col2:
+            st.metric(label="Gateway Performance Status", value=status_color)
 
 # ==============================================================================
 # 🎛️ CENTRAL ROUTER & DEMAND-DRIVEN CONTROLLER
@@ -31,30 +55,38 @@ class MLOpsGateway:
             return False
 
     def route_predict(self, service_name, payload):
-        """Unified inference router with standardized error management for standard JSON payloads."""
+        """Unified inference router with standardized error management and latency tracking."""
         url = self.services.get(service_name)
         if not url:
-            return {"error": f"Service '{service_name}' configuration missing."}
+            return {"success": False, "error": f"Service '{service_name}' configuration missing."}
+        
+        start_time = time.perf_counter()
         try:
             response = requests.post(url, json=payload, timeout=60)
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            
             if response.status_code == 200:
-                return {"success": True, "data": response.json()}
-            return {"success": False, "error": f"API Error ({response.status_code}): {response.text}"}
+                return {"success": True, "data": response.json(), "latency_ms": elapsed_ms}
+            return {"success": False, "error": f"API Error ({response.status_code}): {response.text}", "latency_ms": elapsed_ms}
         except requests.exceptions.Timeout:
             return {"success": False, "error": "Request timed out. The engine is waking up from free-tier hibernation. Please try again!"}
         except Exception as e:
             return {"success": False, "error": f"Failed to connect to backend: {str(e)}"}
 
     def route_file_process(self, service_name, files, data):
-        """Specialized routing method for multipart/form-data operations (Image Processing)."""
+        """Specialized routing method for multipart/form-data operations with latency tracking."""
         url = self.services.get(service_name)
         if not url:
             return {"success": False, "error": f"Service '{service_name}' configuration missing."}
+        
+        start_time = time.perf_counter()
         try:
             response = requests.post(url, files=files, data=data, timeout=60)
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            
             if response.status_code == 200:
-                return {"success": True, "content": response.content}
-            return {"success": False, "error": f"API Error ({response.status_code}): {response.text}"}
+                return {"success": True, "content": response.content, "latency_ms": elapsed_ms}
+            return {"success": False, "error": f"API Error ({response.status_code}): {response.text}", "latency_ms": elapsed_ms}
         except requests.exceptions.Timeout:
             return {"success": False, "error": "Image processor timed out during initialization. Please try again."}
         except Exception as e:
@@ -139,13 +171,13 @@ if navigation == "📊 Tabular: Churn Predictor":
         if result.get("success"):
             data = result['data']
             
-            # Extract values matching your exact API dictionary keys
-            is_churn = data.get("churn_prediction")
-            prob = data.get("churn_probability")
+            # Robust extraction layer covering absolute keys and fallback keys across environments
+            is_churn = data.get("churn_prediction") if data.get("churn_prediction") is not None else (data.get("churn") or data.get("prediction"))
+            prob = data.get("churn_probability") if data.get("churn_probability") is not None else (data.get("probability") or data.get("confidence"))
             
             st.markdown("### 🎯 Analysis Result")
             
-            if is_churn == 1:
+            if is_churn == 1 or is_churn is True:
                 st.error("🚨 **High Risk:** This customer is highly likely to churn.")
             else:
                 st.success("✅ **Low Risk:** This customer is likely to stay retained.")
@@ -153,12 +185,12 @@ if navigation == "📊 Tabular: Churn Predictor":
             # Render the probability cleanly as a metric card
             if prob is not None:
                 st.metric(label="Churn Probability", value=f"{float(prob) * 100:.1f}%")
+                
+            # Render Telemetry UI component
+            render_telemetry_ui(result)
         else:
             st.error(result.get("error"))
-            # ----------------------------------------
-            
-            is_churn = data.get("churn") or data.get("prediction")
-            prob = data.get("probability") or data.get("confidence")
+
 # ==========================================
 # 🖼️ TAB 2: COMPUTER VISION - IMAGE RESIZER
 # ==========================================
@@ -197,8 +229,12 @@ elif navigation == "🖼️ CV: Image Resizer":
                 file_name=f"resized_{width}x{height}_{uploaded_file.name}",
                 mime=uploaded_file.type
             )
+            
+            # Render Telemetry UI component
+            render_telemetry_ui(result)
         else:
             st.error(result.get("error"))
+
 # ==========================================
 # 💬 TAB 3: TRANSFORMER NLP - SENTIMENT
 # ==========================================
@@ -219,7 +255,7 @@ elif navigation == "💬 NLP: Sentiment Analysis":
             if result.get("success"):
                 data = result["data"]
                 
-                # Extract fields based on your DistilBERT pipeline output (e.g., {"label": "POSITIVE", "score": 0.99})
+                # Extract fields based on your DistilBERT pipeline output
                 label = data.get("label") or data.get("sentiment")
                 score = data.get("score") or data.get("confidence")
                 
@@ -235,5 +271,8 @@ elif navigation == "💬 NLP: Sentiment Analysis":
                 
                 if score is not None:
                     st.metric(label="Model Confidence Score", value=f"{float(score) * 100:.2f}%")
+                
+                # Render Telemetry UI component
+                render_telemetry_ui(result)
             else:
                 st.error(result.get("error"))
